@@ -10,14 +10,15 @@ import os
 # ==========================================
 st.set_page_config(page_title="黑土地作物产量与施肥决策系统", layout="wide", page_icon="🌾")
 
-# 设置中文字体，防止图表中文乱码 (适用于 Windows)
+# 设置中文字体，防止图表中文乱码 (适用于 Windows 本地测试)
+# 注意：部署到云端后，如果图表中文变成方块，建议将下方绘图部分的标签改为英文，或在云端安装中文字体。
 plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei'] 
 plt.rcParams['axes.unicode_minus'] = False
 
 # ==========================================
 # 2. 动态加载 SVR 模型
 # ==========================================
-# 这里指向您刚才生成 pkl 文件的 SVR_Models 文件夹
+# 指向相对路径下的 SVR_Models 文件夹 (适合上传云端)
 MODEL_DIR = "SVR_Models"
 
 @st.cache_resource
@@ -84,7 +85,22 @@ with st.expander("🛠️ 可选项：高级辅助参数 (选填)"):
         tp = st.number_input("全磷 TP (%)", min_value=0.0, max_value=1.0, value=0.14, step=0.01)
     with col6:
         tk = st.number_input("全钾 TK (%)", min_value=0.0, max_value=5.0, value=2.4, step=0.1)
-        rotation = st.selectbox("轮作类型", [0, 1, 2, 3], index=2, help="0:连作, 1-3:不同轮作模式")
+        
+        # --- 在此处修改了轮作类型的代码 ---
+        rotation_mapping = {
+            0: "连作 (连续种植同一作物)",
+            1: "大豆-玉米轮作",
+            2: "玉米-大豆轮作",
+            3: "休耕或其他轮作模式"
+        }
+        rotation = st.selectbox(
+            "轮作类型", 
+            options=[0, 1, 2, 3], 
+            index=2, 
+            format_func=lambda x: rotation_mapping[x], 
+            help="请选择当前地块的实际轮作模式"
+        )
+        # ----------------------------------
 
 # ==========================================
 # 5. 后台逻辑：构建输入特征矩阵
@@ -93,7 +109,6 @@ def build_feature_df():
     # 注意：这里的列名必须和 SVR 训练时清洗后的列名完全一致！
     density_col_name = 'Plant number per ha' if crop_type == "大豆 (Soybean)" else 'Crop number per ha'
     
-    # 兼容处理：如果数据集中大豆的密度列叫 'Plant number per mu'，请在这里手动修改替换
     features = {
         'Rotation type': [rotation],
         'Temperature': [temp],
@@ -109,8 +124,6 @@ def build_feature_df():
         density_col_name: [density]
     }
     
-    # 为了防止模型因为输入列名和训练列名顺序不一致报错，最好转化为 Numpy 数组输入
-    # 或者确保这里的字典顺序就是数据库里从左到右的顺序
     return pd.DataFrame(features)
 
 input_df = build_feature_df()
@@ -121,7 +134,6 @@ input_df = build_feature_df()
 if run_prediction:
     if current_model is not None:
         with st.spinner('模型正在基于黑土地本底数据计算中...'):
-            # 使用 .values 规避特征名称不完全匹配的警告
             pred_yield = current_model.predict(input_df.values)[0]
             
             st.success("计算完成！")
@@ -150,14 +162,15 @@ if run_fertilizer:
         max_yield = simulated_yields[best_idx]
         
         fig, ax = plt.subplots(figsize=(8, 4))
-        ax.plot(an_test_values, simulated_yields, label='产量响应曲线', color='#2ca02c', linewidth=2.5)
-        ax.axvline(x=an, color='gray', linestyle='--', label=f'当前水平 ({an:.1f})')
-        ax.axvline(x=best_an, color='red', linestyle='--', label=f'理论最优 ({best_an:.1f})')
+        ax.plot(an_test_values, simulated_yields, label='Yield Response', color='#2ca02c', linewidth=2.5)
+        ax.axvline(x=an, color='gray', linestyle='--', label=f'Current ({an:.1f})')
+        ax.axvline(x=best_an, color='red', linestyle='--', label=f'Optimal ({best_an:.1f})')
         ax.scatter([best_an], [max_yield], color='red', s=80, zorder=5)
         
-        ax.set_title(f"{crop_type} 氮肥施用量与预测产量的关系", fontsize=14, fontweight='bold')
-        ax.set_xlabel("土壤速效氮 AN (mg/kg)", fontsize=12)
-        ax.set_ylabel("预测产量 (kg/ha)", fontsize=12)
+        # 图表标签改为英文，防止上传 Streamlit 云端后乱码
+        ax.set_title(f"Yield vs. Available Nitrogen (AN)", fontsize=14, fontweight='bold')
+        ax.set_xlabel("Available Nitrogen (mg/kg)", fontsize=12)
+        ax.set_ylabel("Predicted Yield (kg/ha)", fontsize=12)
         ax.legend()
         ax.grid(alpha=0.3)
         
